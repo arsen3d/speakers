@@ -6,9 +6,9 @@ requires-python = ">=3.11,<3.13"
 dependencies = [
     "gradio==4.8.0",
     "pyannote.audio==3.1.1",
-    "torch @ https://download.pytorch.org/whl/cu118/torch-2.0.0%2Bcu118-cp311-cp311-win_amd64.whl",
-    "torchvision @ https://download.pytorch.org/whl/cu118/torchvision-0.15.1%2Bcu118-cp311-cp311-win_amd64.whl",
-    "torchaudio @ https://download.pytorch.org/whl/cu118/torchaudio-2.0.0%2Bcu118-cp311-cp311-win_amd64.whl",
+    "torch @ https://download.pytorch.org/whl/cu118/torch-2.1.1%2Bcu118-cp311-cp311-win_amd64.whl",
+    "torchvision @ https://download.pytorch.org/whl/cu118/torchvision-0.16.1%2Bcu118-cp311-cp311-win_amd64.whl",
+    "torchaudio @ https://download.pytorch.org/whl/cu118/torchaudio-2.1.1%2Bcu118-cp311-cp311-win_amd64.whl",
     "huggingface_hub==0.16.4",
     "python-dotenv==1.2.1",
     "numpy==1.26.4",
