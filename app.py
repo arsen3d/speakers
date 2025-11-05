@@ -162,21 +162,86 @@ if __name__ == "__main__":
         print("  python setup.py")
         print("=" * 60 + "\n")
         sys.exit(1)
-    
+
     print("\n" + "=" * 60)
     print("✓ All required models are available")
     print("=" * 60)
     print("Loading models on startup...")
-    
+
     # Pre-load pipeline on startup
     try:
-        get_pipeline()
-        print("✓ Models loaded successfully!")
+        pipeline = get_pipeline()
+        print("✓ Pipeline loaded into memory!")
+
+        # Warmup inference to force models into GPU VRAM
+        print("Warming up models (loading into GPU VRAM)...")
+        print("  Creating temporary audio file...")
+
+        # Create a real temporary WAV file (same approach as diarize_audio uses)
+        import tempfile
+        tmp_fd, tmp_path = tempfile.mkstemp(suffix=".wav")
+        try:
+            # Create 30 seconds of synthetic speech-like audio to trigger all models
+            sample_rate = 16000
+            duration = 30  # 30 seconds to ensure full processing
+            t = np.linspace(0, duration, duration * sample_rate, dtype=np.float32)
+
+            # Create speech-like signal with multiple "speakers"
+            # Speaker 1: 0-15 seconds (fundamental freq ~150 Hz, male-like)
+            speaker1 = np.sin(2 * np.pi * 150 * t[:15*sample_rate])
+            speaker1 += np.sin(2 * np.pi * 300 * t[:15*sample_rate]) * 0.5  # Harmonics
+            speaker1 += np.sin(2 * np.pi * 450 * t[:15*sample_rate]) * 0.3
+            speaker1 *= (0.3 + 0.7 * np.abs(np.sin(2 * np.pi * 3 * t[:15*sample_rate])))  # Amplitude modulation
+
+            # Speaker 2: 15-30 seconds (fundamental freq ~220 Hz, female-like)
+            speaker2 = np.sin(2 * np.pi * 220 * t[15*sample_rate:])
+            speaker2 += np.sin(2 * np.pi * 440 * t[15*sample_rate:]) * 0.5
+            speaker2 += np.sin(2 * np.pi * 660 * t[15*sample_rate:]) * 0.3
+            speaker2 *= (0.3 + 0.7 * np.abs(np.sin(2 * np.pi * 4 * t[15*sample_rate:])))
+
+            # Combine speakers and add slight noise
+            dummy_audio = np.concatenate([speaker1, speaker2])
+            dummy_audio = dummy_audio * 0.3 + np.random.randn(len(dummy_audio)).astype(np.float32) * 0.01
+            dummy_audio = dummy_audio.astype(np.float32)
+
+            sf.write(tmp_path, dummy_audio, sample_rate)
+
+            print(f"  Running warmup inference on temporary file...")
+            print(f"  (This will load all neural network models into GPU VRAM)")
+
+            # Call pipeline exactly like diarize_audio does
+            diarization_result = pipeline(tmp_path)
+
+            print("✓ Warmup completed!")
+            print("✓ All models are now loaded in GPU VRAM!")
+
+            # Show if we got results
+            if hasattr(diarization_result, 'speaker_diarization'):
+                annotation = diarization_result.speaker_diarization
+            else:
+                annotation = diarization_result
+
+            num_speakers = len(list(annotation.labels()))
+            print(f"  Warmup detected {num_speakers} speakers in random noise (expected)")
+
+        except Exception as warmup_error:
+            print(f"✗ Error during warmup inference: {warmup_error}")
+            import traceback
+            traceback.print_exc()
+            print("\n⚠ Warning: Warmup failed, models will load on first actual use")
+        finally:
+            # Clean up
+            os.close(tmp_fd)
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+
     except Exception as e:
-        print(f"✗ Error loading models: {e}")
+        print(f"✗ Error loading pipeline: {e}")
+        import traceback
+        traceback.print_exc()
         sys.exit(1)
-    
+
     print("=" * 60)
     print("Launching Gradio interface...\n")
-    
+
     iface.launch()
