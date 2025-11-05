@@ -128,12 +128,26 @@ def diarize_audio(audio_file):
         else:
             annotation = diarization
 
-        # Format the results
+        # Format the results - only show new lines when speaker changes
         results = []
+        current_speaker = None
+        start_time = None
+        end_time = None
+
         for turn, _, speaker in annotation.itertracks(yield_label=True):
-            start_time = f"{turn.start:.1f}"
+            if speaker != current_speaker:
+                # Speaker changed - save previous speaker's time range
+                if current_speaker is not None:
+                    results.append(f"{current_speaker}: {start_time}s - {end_time}s")
+                # Start tracking new speaker
+                current_speaker = speaker
+                start_time = f"{turn.start:.1f}"
+            # Always update end time for current speaker
             end_time = f"{turn.end:.1f}"
-            results.append(f"{speaker}: {start_time}s - {end_time}s")
+
+        # Add the last speaker's time range
+        if current_speaker is not None:
+            results.append(f"{current_speaker}: {start_time}s - {end_time}s")
 
         return "\n".join(results) if results else "No speakers detected in the audio."
     
