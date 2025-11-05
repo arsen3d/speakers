@@ -1778,11 +1778,11 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "gradio" },
+    { name = "gradio", specifier = "==4.8.0" },
     { name = "huggingface-hub", specifier = "==0.16.4" },
-    { name = "numpy", specifier = "<2" },
-    { name = "pyannote-audio" },
-    { name = "python-dotenv" },
+    { name = "numpy", specifier = "==1.26.4" },
+    { name = "pyannote-audio", specifier = "==3.1.1" },
+    { name = "python-dotenv", specifier = "==1.2.1" },
     { name = "torch", url = "https://download.pytorch.org/whl/cu118/torch-2.0.0%2Bcu118-cp311-cp311-win_amd64.whl" },
     { name = "torchaudio", url = "https://download.pytorch.org/whl/cu118/torchaudio-2.0.0%2Bcu118-cp311-cp311-win_amd64.whl" },
     { name = "torchvision", url = "https://download.pytorch.org/whl/cu118/torchvision-0.15.1%2Bcu118-cp311-cp311-win_amd64.whl" },
