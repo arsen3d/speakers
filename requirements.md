@@ -1,0 +1,10 @@
+# Idea
+Build a python app based on https://github.com/pyannote/pyannote-audio
+Be sure to use gradio
+use python uv command to install requirements
+instead of uv run pip install do uv pip install
+
+# User Experience
+Select mp3 or wave file.
+upload it.
+result should be a time stamps of when each speaker is speaking.
