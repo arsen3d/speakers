@@ -11,6 +11,7 @@ import soundfile as sf
 from pydub import AudioSegment
 import yaml
 import sys
+from faster_whisper import WhisperModel
 
 # Re-enable TF32 for better performance
 torch.backends.cuda.matmul.allow_tf32 = True
@@ -29,6 +30,7 @@ if hf_token:
 
 # Lazy-loaded pipeline
 pipeline = None
+whisper_model = None
 device = None
 print(f"CUDA available: {torch.cuda.is_available()}")
 
@@ -62,7 +64,7 @@ def get_pipeline():
         models_ok, msg = check_models_exist()
         if not models_ok:
             raise Exception(msg)
-        
+
         print("Loading pipeline from local cache...")
         # Load from the HuggingFace model ID, but with cache_dir pointing to our local data
         pipeline = Pipeline.from_pretrained(
@@ -70,11 +72,28 @@ def get_pipeline():
             use_auth_token=hf_token,
             cache_dir="data",
         )
-        
+
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         pipeline.to(device)
         print(f"✓ Pipeline loaded successfully on {device}!")
     return pipeline
+
+def get_whisper_model():
+    """Load and cache the Whisper model."""
+    global whisper_model, device
+    if whisper_model is None:
+        print("Loading Whisper model...")
+        device_type = "cuda" if torch.cuda.is_available() else "cpu"
+        compute_type = "float16" if device_type == "cuda" else "int8"
+
+        whisper_model = WhisperModel(
+            "tiny",
+            device=device_type,
+            compute_type=compute_type,
+            download_root="data/whisper"
+        )
+        print(f"✓ Whisper model loaded successfully on {device_type}!")
+    return whisper_model
 
 def load_audio_manually(audio_file):
     """Load audio file manually using soundfile/pydub as fallback"""
@@ -101,24 +120,42 @@ def load_audio_manually(audio_file):
         except ImportError:
             raise Exception("Neither soundfile nor pydub is available for audio loading")
 
-def diarize_audio(audio_file):
-    """Perform speaker diarization on the uploaded audio file."""
+def transcribe_and_diarize(audio_file):
+    """Perform transcription and speaker diarization, then combine them."""
     if audio_file is None:
         return "Please upload an audio file."
 
     try:
-        # Load pipeline only when needed
+        # Load both models
         pipeline = get_pipeline()
+        whisper = get_whisper_model()
 
-        # Try to load audio manually first to avoid torchcodec issues
+        # Step 1: Transcribe with Whisper (word-level timestamps)
+        print("Transcribing audio...")
+        segments, info = whisper.transcribe(
+            audio_file,
+            word_timestamps=True,
+            language="en"  # Set to None for auto-detection, or specify language
+        )
+
+        # Collect all words with timestamps
+        words = []
+        for segment in segments:
+            if hasattr(segment, 'words') and segment.words:
+                for word in segment.words:
+                    words.append({
+                        'start': word.start,
+                        'end': word.end,
+                        'text': word.word
+                    })
+
+        # Step 2: Perform speaker diarization
+        print("Performing speaker diarization...")
         try:
             audio_dict = load_audio_manually(audio_file)
-            # Move to device
             audio_dict["waveform"] = audio_dict["waveform"].to(device)
-            # Run diarization with manually loaded audio
             diarization = pipeline(audio_dict)
         except Exception as audio_load_error:
-            # Fallback to letting pipeline handle it
             print(f"Manual audio loading failed: {audio_load_error}, trying pipeline default...")
             diarization = pipeline(audio_file)
 
@@ -128,39 +165,105 @@ def diarize_audio(audio_file):
         else:
             annotation = diarization
 
-        # Format the results - only show new lines when speaker changes
+        # Step 3: Combine transcription with speaker labels
+        print("Combining transcription with speaker labels...")
+
+        # Build speaker segments list
+        speaker_segments = []
+        for turn, _, speaker in annotation.itertracks(yield_label=True):
+            speaker_segments.append({
+                'start': turn.start,
+                'end': turn.end,
+                'speaker': speaker
+            })
+
+        # Debug: Print speaker segments
+        print(f"DEBUG: Found {len(speaker_segments)} speaker segments:")
+        for seg in speaker_segments:
+            print(f"  {seg['speaker']}: {seg['start']:.2f}s - {seg['end']:.2f}s")
+
+        # Assign speakers to words
+        unassigned_count = 0
+        for word in words:
+            word_mid = (word['start'] + word['end']) / 2
+            # Find which speaker segment this word belongs to
+            assigned_speaker = None
+            min_distance = float('inf')
+
+            for segment in speaker_segments:
+                if segment['start'] <= word_mid <= segment['end']:
+                    # Word is inside this segment - perfect match
+                    assigned_speaker = segment['speaker']
+                    break
+                else:
+                    # Calculate distance to this segment
+                    if word_mid < segment['start']:
+                        distance = segment['start'] - word_mid
+                    else:  # word_mid > segment['end']
+                        distance = word_mid - segment['end']
+
+                    # Keep track of nearest segment
+                    if distance < min_distance:
+                        min_distance = distance
+                        assigned_speaker = segment['speaker']
+
+            word['speaker'] = assigned_speaker if assigned_speaker else "UNKNOWN"
+            if assigned_speaker is None:
+                unassigned_count += 1
+
+        # Debug: Print speaker assignment summary
+        speaker_counts = {}
+        for word in words:
+            speaker = word['speaker']
+            speaker_counts[speaker] = speaker_counts.get(speaker, 0) + 1
+
+        print(f"DEBUG: Word speaker assignment summary:")
+        for speaker, count in speaker_counts.items():
+            print(f"  {speaker}: {count} words")
+        if unassigned_count > 0:
+            print(f"  WARNING: {unassigned_count} words could not be assigned to any speaker!")
+
+        # Step 4: Format output - group consecutive words by same speaker
         results = []
         current_speaker = None
-        start_time = None
-        end_time = None
+        current_text = []
+        current_start = None
 
-        for turn, _, speaker in annotation.itertracks(yield_label=True):
-            if speaker != current_speaker:
-                # Speaker changed - save previous speaker's time range
-                if current_speaker is not None:
-                    results.append(f"{current_speaker}: {start_time}s - {end_time}s")
-                # Start tracking new speaker
-                current_speaker = speaker
-                start_time = f"{turn.start:.1f}"
-            # Always update end time for current speaker
-            end_time = f"{turn.end:.1f}"
+        for word in words:
+            if word['speaker'] != current_speaker:
+                # Speaker changed - save previous speaker's text
+                if current_speaker is not None and current_text:
+                    text = ''.join(current_text).strip()
+                    results.append(f"{current_speaker} [{current_start:.1f}s]: {text}")
 
-        # Add the last speaker's time range
-        if current_speaker is not None:
-            results.append(f"{current_speaker}: {start_time}s - {end_time}s")
+                # Start new speaker segment
+                current_speaker = word['speaker']
+                current_text = [word['text']]
+                current_start = word['start']
+            else:
+                # Same speaker continues
+                current_text.append(word['text'])
 
-        return "\n".join(results) if results else "No speakers detected in the audio."
-    
+        # Add the last speaker's text
+        if current_speaker is not None and current_text:
+            text = ''.join(current_text).strip()
+            results.append(f"{current_speaker} [{current_start:.1f}s]: {text}")
+
+        return "\n\n".join(results) if results else "No speakers or transcription detected in the audio."
+
     except Exception as e:
-        return f"Error during diarization: {str(e)}"
+        import traceback
+        error_msg = f"Error during transcription/diarization: {str(e)}\n\n"
+        error_msg += traceback.format_exc()
+        return error_msg
 
 # Create Gradio interface
 iface = gr.Interface(
-    fn=diarize_audio,
+    fn=transcribe_and_diarize,
     inputs=gr.Audio(type="filepath", label="Upload Audio File (MP3 or WAV)"),
-    outputs=gr.Textbox(label="Speaker Timestamps", lines=15),
-    title="Speaker Diarization App",
-    description="Upload an audio file to get timestamps of when each speaker is speaking."
+    outputs=gr.Textbox(label="Transcription with Speaker Labels", lines=20),
+    title="Speaker Diarization + Transcription App",
+    description="Upload an audio file to get a transcription with speaker labels and timestamps."
 )
 
 if __name__ == "__main__":
@@ -182,10 +285,13 @@ if __name__ == "__main__":
     print("=" * 60)
     print("Loading models on startup...")
 
-    # Pre-load pipeline on startup
+    # Pre-load pipeline and Whisper on startup
     try:
         pipeline = get_pipeline()
         print("✓ Pipeline loaded into memory!")
+
+        whisper = get_whisper_model()
+        print("✓ Whisper model loaded into memory!")
 
         # Warmup inference to force models into GPU VRAM
         print("Warming up models (loading into GPU VRAM)...")
@@ -223,8 +329,14 @@ if __name__ == "__main__":
             print(f"  Running warmup inference on temporary file...")
             print(f"  (This will load all neural network models into GPU VRAM)")
 
-            # Call pipeline exactly like diarize_audio does
+            # Call pipeline exactly like transcribe_and_diarize does
             diarization_result = pipeline(tmp_path)
+
+            # Warmup Whisper too
+            print("  Warming up Whisper model...")
+            whisper_segments, _ = whisper.transcribe(tmp_path, word_timestamps=True)
+            # Consume the generator
+            list(whisper_segments)
 
             print("✓ Warmup completed!")
             print("✓ All models are now loaded in GPU VRAM!")
