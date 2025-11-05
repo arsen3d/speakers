@@ -1,12 +1,15 @@
 [project]
 name = "speakers"
-version = "0.1.0"
-description = "Speaker diarization app using pyannote and gradio"
+version = "1.0.0"
+description = "Speaker diarization app using pyannote and gradio with GPU acceleration"
 requires-python = ">=3.11,<3.13"
 dependencies = [
     "gradio",
     "pyannote.audio",
-    "torch",
+    "torch @ https://download.pytorch.org/whl/cu118/torch-2.0.0%2Bcu118-cp311-cp311-win_amd64.whl",
+    "torchvision @ https://download.pytorch.org/whl/cu118/torchvision-0.15.1%2Bcu118-cp311-cp311-win_amd64.whl",
+    "torchaudio @ https://download.pytorch.org/whl/cu118/torchaudio-2.0.0%2Bcu118-cp311-cp311-win_amd64.whl",
     "huggingface_hub",
     "python-dotenv",
+    "numpy<2",
 ]
