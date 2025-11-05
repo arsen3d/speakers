@@ -20,14 +20,17 @@ if hf_token:
 
 # Lazy-loaded pipeline
 pipeline = None
-
+device = None
+print(torch.cuda.is_available())
 def get_pipeline():
-    global pipeline
+    global pipeline, device
     if pipeline is None:
         try:
             from pyannote.audio import Pipeline
             pipeline = Pipeline.from_pretrained("pyannote/speaker-diarization-3.1")
-            print("Pipeline loaded successfully!")
+            device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+            pipeline.to(device)
+            print(f"Pipeline loaded successfully on {device}!")
         except Exception as e:
             error_msg = str(e)
             if "403" in error_msg or "gated" in error_msg.lower() or "forbidden" in error_msg.lower():
@@ -74,6 +77,8 @@ def diarize_audio(audio_file):
         # Try to load audio manually first to avoid torchcodec issues
         try:
             audio_dict = load_audio_manually(audio_file)
+            # Move to device
+            audio_dict["waveform"] = audio_dict["waveform"].to(device)
             # Run diarization with manually loaded audio
             diarization = pipeline(audio_dict)
         except Exception as audio_load_error:
