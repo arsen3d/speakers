@@ -5,6 +5,10 @@ from dotenv import load_dotenv
 import numpy as np
 import torch
 
+# Re-enable TF32 for better performance
+torch.backends.cuda.matmul.allow_tf32 = True
+torch.backends.cudnn.allow_tf32 = True
+
 # Load environment variables from .env file
 load_dotenv()
 
