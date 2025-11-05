@@ -20,7 +20,7 @@ dependencies = [
     "soundfile>=0.13.1",
     "matplotlib>=3.10.0",
     "python-dotenv==1.2.1",
-    "gradio"
+    "gradio",
 ]
 
 [tool.uv]

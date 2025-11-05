@@ -4,6 +4,10 @@ import os
 from dotenv import load_dotenv
 import numpy as np
 import torch
+from huggingface_hub import login
+from pyannote.audio import Pipeline
+import soundfile as sf
+from pydub import AudioSegment
 
 # Re-enable TF32 for better performance
 torch.backends.cuda.matmul.allow_tf32 = True
@@ -16,7 +20,6 @@ load_dotenv()
 hf_token = os.getenv('HF_TOKEN')
 if hf_token:
     try:
-        from huggingface_hub import login
         login(hf_token)
     except Exception as e:
         print(f"Failed to login to Hugging Face: {e}")
@@ -30,7 +33,6 @@ def get_pipeline():
     global pipeline, device
     if pipeline is None:
         try:
-            from pyannote.audio import Pipeline
             pipeline = Pipeline.from_pretrained("pyannote/speaker-diarization-3.1")
             device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
             pipeline.to(device)
@@ -46,7 +48,6 @@ def get_pipeline():
 def load_audio_manually(audio_file):
     """Load audio file manually using soundfile/pydub as fallback"""
     try:
-        import soundfile as sf
         # Load audio with soundfile
         audio_data, sample_rate = sf.read(audio_file)
         # Convert to mono if stereo
@@ -57,7 +58,6 @@ def load_audio_manually(audio_file):
         return {"waveform": audio_data.unsqueeze(0), "sample_rate": sample_rate}
     except ImportError:
         try:
-            from pydub import AudioSegment
             # Load with pydub
             audio = AudioSegment.from_file(audio_file)
             # Convert to mono and get raw data
